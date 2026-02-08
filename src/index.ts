@@ -5,8 +5,8 @@
  *
  * Orchestrates GitHub and Jira MCP servers to generate AI-powered reports:
  * - Daily standups
- * - Weekly summaries (Phase 2)
- * - Sprint retrospectives (Phase 3)
+ * - Weekly summaries
+ * - Sprint retrospectives
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -14,7 +14,12 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { GitHubMCPAdapter } from './adapters/github-mcp.js';
 import { JiraMCPAdapter } from './adapters/jira-mcp.js';
-import { generateDailyReport, isAIConfigured } from './generators/report-generator.js';
+import {
+  generateDailyReport,
+  generateWeeklyReport,
+  generateRetrospective,
+  isAIConfigured,
+} from './generators/report-generator.js';
 
 const server = new Server(
   { name: 'prodbeam-mcp', version: '0.1.0' },
@@ -109,14 +114,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'generate_weekly_report': {
         const team = typeof args?.['team'] === 'boolean' ? args['team'] : false;
-        return handleWeeklyReport(team);
+        return await handleWeeklyReport(team);
       }
 
       case 'generate_retrospective': {
         const sprint = typeof args?.['sprint'] === 'string' ? args['sprint'] : undefined;
         const from = typeof args?.['from'] === 'string' ? args['from'] : undefined;
         const to = typeof args?.['to'] === 'string' ? args['to'] : undefined;
-        return handleRetrospective(sprint, from, to);
+        return await handleRetrospective(sprint, from, to);
       }
 
       case 'setup_check':
@@ -200,35 +205,172 @@ async function handleDailyReport(hours: number) {
 }
 
 /**
- * Generate weekly summary report (Phase 2)
+ * Generate weekly summary report
  */
-function handleWeeklyReport(team: boolean) {
-  const reportType = team ? 'Team Weekly Summary' : 'Personal Weekly Summary';
-  return {
-    content: [
-      {
-        type: 'text' as const,
-        text: `# ${reportType}\n\nThis feature is under development (Phase 2).\n\nUse generate_daily_report for current functionality.`,
-      },
-    ],
-  };
+async function handleWeeklyReport(team: boolean) {
+  // Team-wide reports require multi-user adapter support (future work)
+  if (team) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `# Team Weekly Summary\n\nTeam-wide reports are coming soon. The current adapters support single-user queries.\n\nUse generate_weekly_report without the team flag for your personal weekly summary.`,
+        },
+      ],
+    };
+  }
+
+  // Check if GitHub is configured
+  if (!GitHubMCPAdapter.isConfigured()) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: buildSetupInstructions(
+            'GitHub is not configured. Run the setup_check tool for instructions.'
+          ),
+        },
+      ],
+    };
+  }
+
+  const github = new GitHubMCPAdapter();
+  let jira: JiraMCPAdapter | null = null;
+
+  try {
+    // Connect to GitHub MCP
+    await github.connect();
+    const githubActivity = await github.fetchActivity(168); // 7 days
+
+    // Connect to Jira MCP (optional)
+    let jiraActivity = undefined;
+    if (JiraMCPAdapter.isConfigured()) {
+      try {
+        jira = new JiraMCPAdapter();
+        await jira.connect();
+        jiraActivity = await jira.fetchActivity(168);
+      } catch (error) {
+        console.error('[prodbeam] Jira connection failed (continuing without Jira):', error);
+      }
+    }
+
+    // Generate report
+    const report = await generateWeeklyReport({
+      github: githubActivity,
+      jira: jiraActivity,
+    });
+
+    return {
+      content: [{ type: 'text' as const, text: report }],
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `# Weekly Report - Error\n\nFailed to generate report: ${errorMessage}\n\nRun the setup_check tool to verify your configuration.`,
+        },
+      ],
+    };
+  } finally {
+    await github.disconnect();
+    if (jira) {
+      await jira.disconnect();
+    }
+  }
 }
 
 /**
- * Generate sprint retrospective (Phase 3)
+ * Generate sprint retrospective
  */
-function handleRetrospective(sprint?: string, from?: string, to?: string) {
+async function handleRetrospective(sprint?: string, from?: string, to?: string) {
   const sprintName = sprint ?? 'Current Sprint';
-  const dateRange = from && to ? `${from} to ${to}` : 'dates not specified';
 
-  return {
-    content: [
-      {
-        type: 'text' as const,
-        text: `# Sprint Retrospective: ${sprintName}\n\nDate range: ${dateRange}\n\nThis feature is under development (Phase 3).\n\nUse generate_daily_report for current functionality.`,
-      },
-    ],
-  };
+  // Calculate hours from date range, default to 14 days (typical sprint)
+  let hours = 336; // 14 days
+  let dateFrom = '';
+  let dateTo = '';
+
+  if (from && to) {
+    const fromDate = new Date(from);
+    const toDate = new Date(to);
+    if (!isNaN(fromDate.getTime()) && !isNaN(toDate.getTime())) {
+      hours = Math.max(1, Math.ceil((toDate.getTime() - fromDate.getTime()) / (1000 * 60 * 60)));
+      dateFrom = from;
+      dateTo = to;
+    } else {
+      dateFrom = from;
+      dateTo = to;
+    }
+  } else {
+    const now = new Date();
+    const twoWeeksAgo = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+    dateFrom = twoWeeksAgo.toISOString().split('T')[0] ?? '';
+    dateTo = now.toISOString().split('T')[0] ?? '';
+  }
+
+  // Check if GitHub is configured
+  if (!GitHubMCPAdapter.isConfigured()) {
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: buildSetupInstructions(
+            'GitHub is not configured. Run the setup_check tool for instructions.'
+          ),
+        },
+      ],
+    };
+  }
+
+  const github = new GitHubMCPAdapter();
+  let jira: JiraMCPAdapter | null = null;
+
+  try {
+    // Connect to GitHub MCP
+    await github.connect();
+    const githubActivity = await github.fetchActivity(hours);
+
+    // Connect to Jira MCP (optional)
+    let jiraActivity = undefined;
+    if (JiraMCPAdapter.isConfigured()) {
+      try {
+        jira = new JiraMCPAdapter();
+        await jira.connect();
+        jiraActivity = await jira.fetchActivity(hours);
+      } catch (error) {
+        console.error('[prodbeam] Jira connection failed (continuing without Jira):', error);
+      }
+    }
+
+    // Generate retrospective
+    const report = await generateRetrospective({
+      sprintName,
+      dateRange: { from: dateFrom, to: dateTo },
+      github: githubActivity,
+      jira: jiraActivity,
+    });
+
+    return {
+      content: [{ type: 'text' as const, text: report }],
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return {
+      content: [
+        {
+          type: 'text' as const,
+          text: `# Sprint Retrospective - Error\n\nFailed to generate retrospective: ${errorMessage}\n\nRun the setup_check tool to verify your configuration.`,
+        },
+      ],
+    };
+  } finally {
+    await github.disconnect();
+    if (jira) {
+      await jira.disconnect();
+    }
+  }
 }
 
 /**
