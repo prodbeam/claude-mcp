@@ -17,8 +17,7 @@
 // ─── GitHub App ────────────────────────────────────────────
 
 /** GitHub App client ID for device flow authentication. */
-export const GITHUB_CLIENT_ID =
-  process.env['PRODBEAM_GITHUB_CLIENT_ID'] || 'REPLACE_WITH_GITHUB_APP_CLIENT_ID';
+export const GITHUB_CLIENT_ID = 'Iv23liR2346KoRqEUAyK';
 
 /** OAuth scopes requested during GitHub authentication. */
 export const GITHUB_SCOPES = ['repo', 'read:org', 'read:user'];
@@ -26,12 +25,11 @@ export const GITHUB_SCOPES = ['repo', 'read:org', 'read:user'];
 // ─── Jira OAuth App ────────────────────────────────────────
 
 /** Jira OAuth 2.0 (3LO) client ID. */
-export const JIRA_CLIENT_ID =
-  process.env['PRODBEAM_JIRA_CLIENT_ID'] || 'REPLACE_WITH_JIRA_OAUTH_CLIENT_ID';
+export const JIRA_CLIENT_ID = 'CpFTSfXTqJc5JYuMYxsf0KXgbCs8Aeg6';
 
 /** Jira OAuth 2.0 (3LO) client secret. */
 export const JIRA_CLIENT_SECRET =
-  process.env['PRODBEAM_JIRA_CLIENT_SECRET'] || 'REPLACE_WITH_JIRA_OAUTH_CLIENT_SECRET';
+  'ATOAnpwKOU-Nkq8jOd3TKEbYRSnXbB8pIuHNKc15ouBfmuimsywEvWIiGNdo4zbQQElI9ABDB926';
 
 /** OAuth scopes requested during Jira authentication. */
 export const JIRA_SCOPES = [
